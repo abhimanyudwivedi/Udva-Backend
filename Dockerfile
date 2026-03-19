@@ -18,4 +18,6 @@ ENV PORT=8000
 # API server — Railway overrides CMD for worker/beat services:
 #   worker: celery -A celery_app worker --concurrency=4 -Q default,engine
 #   beat:   celery -A celery_app beat --loglevel=info
-CMD ["sh", "-c", "uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+ENV PATH="/app/.venv/bin:$PATH"
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
