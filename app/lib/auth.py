@@ -2,13 +2,13 @@
 
 Token structure
 ---------------
-Access token payload:  { "sub": "<user_id>", "plan": "<plan>",
-                          "type": "access",  "exp": <unix_ts> }
-Refresh token payload: { "sub": "<user_id>",
-                          "type": "refresh", "exp": <unix_ts> }
+Supabase access token (frontend → backend):
+    { "sub": "<supabase_user_uuid>", "email": "...", "exp": <unix_ts>, ... }
+    Decoded with SUPABASE_JWT_SECRET from Supabase dashboard → Settings → API.
 
-The ``type`` claim lets decode_token distinguish the two so a refresh token
-cannot be used as an access token and vice-versa.
+Legacy tokens (kept for /auth/* routes):
+    Access:  { "sub": "<user_id>", "plan": "<plan>", "type": "access",  "exp": ... }
+    Refresh: { "sub": "<user_id>",                   "type": "refresh", "exp": ... }
 """
 
 import logging
@@ -126,25 +126,38 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """FastAPI dependency that resolves the Bearer token to a User row.
+    """FastAPI dependency that resolves a Supabase Bearer token to a User row.
 
-    Validates that the token is an *access* token (not a refresh token),
-    then fetches the corresponding User from the database.
+    Decodes the Supabase JWT using SUPABASE_JWT_SECRET. On first login the
+    user is auto-provisioned in our database (plan = 'trial').
 
     Raises:
-        HTTPException 401: If the token is invalid, expired, wrong type,
-            or the user no longer exists.
+        HTTPException 401: If the token is invalid, expired, or missing sub.
     """
-    payload = decode_token(credentials.credentials)
-
-    if payload.get("type") != "access":
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.SUPABASE_JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_aud": False},
+        )
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except JWTError as exc:
+        logger.warning("Supabase JWT decode failure: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     user_id: str | None = payload.get("sub")
+    email: str | None = payload.get("email")
+
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -156,10 +169,22 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
+        # First login via Supabase — auto-provision a User row
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing email claim",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user = User(
+            id=user_id,  # type: ignore[arg-type]
+            email=email,
+            hashed_pw="",  # Supabase manages auth — no local password
+            plan="trial",
         )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        logger.info("Auto-provisioned user %s (%s)", user_id, email)
 
     return user

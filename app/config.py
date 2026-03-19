@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     JWT_SECRET_KEY: str = Field(description="64-char random hex secret for JWT signing")
     JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
+    SUPABASE_JWT_SECRET: str = Field(
+        description="Supabase JWT secret — from Supabase dashboard → Settings → API → JWT Secret"
+    )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         default=30, description="Access token TTL in minutes"
     )

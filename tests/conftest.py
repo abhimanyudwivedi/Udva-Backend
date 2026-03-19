@@ -25,6 +25,7 @@ _TEST_ENV: dict[str, str] = {
     "REDDIT_CLIENT_SECRET": "test-reddit-secret",
     "SERPER_API_KEY": "test-serper-key",
     "JWT_SECRET_KEY": "a" * 64,  # 64-char hex-like string
+    "SUPABASE_JWT_SECRET": "b" * 64,  # dummy — tests use JWT_SECRET_KEY directly
     "DODO_PAYMENTS_API_KEY": "test-dodo-key",
     "DODO_WEBHOOK_SECRET": "test-dodo-webhook-secret",
     "RESEND_API_KEY": "test-resend-key",
