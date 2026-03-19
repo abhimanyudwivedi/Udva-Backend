@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     OPENAI_API_KEY: str = Field(description="OpenAI API key (sk-...)")
     ANTHROPIC_API_KEY: str = Field(description="Anthropic API key (sk-ant-...)")
-    GOOGLE_AI_API_KEY: str = Field(default="", description="Google AI / Gemini API key (AIza...)")
+    GOOGLE_AI_API_KEY: str = Field(description="Google AI / Gemini API key (AIza...)")
     PERPLEXITY_API_KEY: str = Field(
         default="",
         description="Perplexity API key — optional, required for Growth+ plans",
