@@ -28,10 +28,10 @@ app = Celery(
         "app.tasks.relevance_scorer",
         "app.tasks.deduplicator",
         "app.tasks.alert_dispatcher",
-        # Pillar 3 — Engagement Engine
-        "app.engine.account_warmer",
-        "app.engine.stick_monitor",
-        "app.engine.post_executor",
+        # Pillar 3 — Engagement Engine (not yet implemented)
+        # "app.engine.account_warmer",
+        # "app.engine.stick_monitor",
+        # "app.engine.post_executor",
     ],
 )
 
@@ -79,18 +79,15 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=8, minute=0),
         "kwargs": {"plan_tier": ["solo", "indie"]},
     },
-    # ------------------------------------------------------------------
-    # Pillar 3 — account warming (daily 2:30AM UTC)
-    # ------------------------------------------------------------------
-    "warm-accounts": {
-        "task": "app.engine.account_warmer.warm_all_accounts",
-        "schedule": crontab(hour=2, minute=30),
-    },
-    # Pillar 3 — stick rate monitor (daily 4AM UTC)
-    "check-campaign-stick": {
-        "task": "app.engine.stick_monitor.check_all_active_campaigns",
-        "schedule": crontab(hour=4, minute=0),
-    },
+    # Pillar 3 — not yet implemented
+    # "warm-accounts": {
+    #     "task": "app.engine.account_warmer.warm_all_accounts",
+    #     "schedule": crontab(hour=2, minute=30),
+    # },
+    # "check-campaign-stick": {
+    #     "task": "app.engine.stick_monitor.check_all_active_campaigns",
+    #     "schedule": crontab(hour=4, minute=0),
+    # },
 }
 
 # ---------------------------------------------------------------------------
