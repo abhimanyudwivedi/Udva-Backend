@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir uv
 
 # Copy dependency manifests and install — layer cached unless these files change
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application source
 COPY . .
