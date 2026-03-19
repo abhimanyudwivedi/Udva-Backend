@@ -906,6 +906,93 @@ Build [X] with:
 
 ---
 
-*Last updated: March 2026*  
-*Product: Udva · Domain: udva.io*  
-*Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway*
+## 15. Next Steps (pick up here — 2026-03-20)
+
+### Status snapshot
+| Layer | Status |
+|-------|--------|
+| Backend (Pillars 1 + 2) | ✅ Live on Railway |
+| Frontend (Next.js 14) | ✅ Built locally, **not yet deployed** |
+| Backend ↔ Frontend auth | ✅ Connected via Supabase JWT |
+| Google OAuth | ⏳ Needs Google Cloud credentials |
+| Vercel deployment | ⏳ Ready to deploy |
+
+---
+
+### Step 1 — Deploy frontend to Vercel (30 min)
+
+**a. Google Cloud OAuth credentials**
+1. console.cloud.google.com → APIs & Services → Credentials → Create OAuth client ID
+2. Application type: Web application
+3. Authorized redirect URI: `https://dzspepexggkqjwjbkidn.supabase.co/auth/v1/callback`
+4. Copy Client ID + Client Secret
+5. Supabase dashboard → Authentication → Providers → Google → paste both → enable
+
+**b. Deploy**
+```bash
+cd /Users/abhimanyudwivedi/Documents/udva-frontend
+npm install -g vercel   # if not installed
+vercel env add NEXT_PUBLIC_SUPABASE_URL production
+vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
+vercel env add NEXT_PUBLIC_API_URL production   # https://udva-backend-production.up.railway.app
+vercel --prod
+```
+
+**c. Post-deploy — Supabase redirect URL**
+- Supabase dashboard → Authentication → URL Configuration
+- Site URL: `https://your-app.vercel.app`
+- Redirect URLs: add `https://your-app.vercel.app/auth/callback`
+
+**d. Railway — add missing env var**
+- Add `SUPABASE_JWT_SECRET` → value from Supabase dashboard → Settings → API → JWT Secret
+- Railway will auto-redeploy the backend
+
+---
+
+### Step 2 — End-to-end smoke test
+
+1. Open Vercel URL → sign up with Google
+2. Check Railway logs — should see `Auto-provisioned user <uuid> (<email>)`
+3. Add a brand → add a query → check `/dashboard` loads visibility chart
+4. Check `/dashboard/brands` CRUD works
+
+---
+
+### Step 3 — Pending backend items
+
+**Reddit API** (waiting for approval)
+- Once approved: update Reddit credentials in Railway env vars
+- `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` → replace placeholders
+
+**DodoPayments**
+- Create products in DodoPayments dashboard for each plan
+- Update Railway: `DODO_PRODUCT_SOLO`, `DODO_PRODUCT_INDIE`, `DODO_PRODUCT_STUDIO`, `DODO_PRODUCT_AGENCY`
+- Change `DODO_ENVIRONMENT=live_mode` when ready to accept payments
+
+**Campaigns API (Pillar 3 entry point)**
+- `app/schemas/campaign.py` — CampaignCreate, CampaignResponse schemas
+- `app/routes/campaigns.py` — POST /brands/{id}/campaigns, GET status
+- Register router in `app/main.py`
+- Build only after revenue is flowing
+
+---
+
+### Step 4 — Pillar 3 Engagement Engine
+> Build only after Pillars 1 + 2 are generating revenue.
+
+Order:
+1. `app/engine/account_manager.py` — select best account, mark_used
+2. `app/engine/post_executor.py` — PRAW post/comment with account credentials
+3. `app/engine/post_scheduler.py` — randomised delay jitter (15min–4hr)
+4. `app/engine/upvote_engine.py` — staggered upvotes from separate accounts
+5. `app/engine/stick_monitor.py` — daily check, refund if removed
+6. `app/engine/account_warmer.py` — daily browse/upvote to keep accounts human-looking
+7. `app/engine/proxy_manager.py` — per-account residential proxy
+
+Uncomment Pillar 3 entries in `celery_app.py` once modules are built.
+
+---
+
+*Last updated: 2026-03-20*
+*Product: Udva · Domain: udva.io*
+*Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway · Next.js 14 · Vercel · Supabase*
