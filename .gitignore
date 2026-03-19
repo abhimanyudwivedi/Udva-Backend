@@ -1,0 +1,59 @@
+# ============================================================
+# Udva — .gitignore
+# ============================================================
+
+# ---- Secrets & environment ----
+.env
+.env.local
+.env.*.local
+
+# ---- Python bytecode ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# ---- Distribution / packaging ----
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+
+# ---- uv ----
+.uv/
+
+# ---- Type checking ----
+.mypy_cache/
+.dmypy.json
+
+# ---- Linting ----
+.ruff_cache/
+
+# ---- Test / coverage ----
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ---- IDE / editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ---- Claude Code ----
+.claude/
+
+# ---- Alembic generated files (keep versions/, ignore pycache inside) ----
+alembic/versions/__pycache__/
+
+# ---- Logs ----
+*.log
+celerybeat-schedule
+celerybeat.pid
