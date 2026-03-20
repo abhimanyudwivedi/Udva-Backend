@@ -109,7 +109,7 @@ async def sample_user(test_db: AsyncSession) -> User:
     """
     user = User(
         id=uuid.uuid4(),
-        email="test@udva.io",
+        email="test@udva.net",
         hashed_pw=hash_password("password123"),
         plan="solo",
         alert_threshold=60,

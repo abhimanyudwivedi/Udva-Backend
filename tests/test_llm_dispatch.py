@@ -233,7 +233,7 @@ class TestRunBrandVisibilityAsync:
             "brand_mentioned": True,
             "mention_rank": 1,
             "sentiment": "positive",
-            "cited_urls": ["https://udva.io", "https://example.com"],
+            "cited_urls": ["https://udva.net", "https://example.com"],
         }
 
         mock_db = MagicMock()
@@ -259,7 +259,7 @@ class TestRunBrandVisibilityAsync:
 
         mock_citations.assert_awaited_once()
         call_kwargs = mock_citations.call_args.kwargs
-        assert call_kwargs["urls"] == ["https://udva.io", "https://example.com"]
+        assert call_kwargs["urls"] == ["https://udva.net", "https://example.com"]
 
     async def test_no_queries_skips_pipeline(self) -> None:
         from app.tasks.llm_dispatch import _run_brand_visibility_async

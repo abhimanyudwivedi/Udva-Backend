@@ -45,7 +45,7 @@ def _build_alert_html(
   <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
   <p style="color: #9ca3af; font-size: 12px;">
     You're receiving this because you have mention alerts enabled on
-    <a href="https://app.udva.io" style="color: #9ca3af;">Udva</a>.
+    <a href="https://app.udva.net" style="color: #9ca3af;">Udva</a>.
   </p>
 </body>
 </html>

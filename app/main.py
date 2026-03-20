@@ -51,9 +51,9 @@ app = FastAPI(
 # CORS
 # ---------------------------------------------------------------------------
 ALLOWED_ORIGINS = [
-    "https://udva.io",
-    "https://www.udva.io",
-    "https://app.udva.io",
+    "https://udva.net",
+    "https://www.udva.net",
+    "https://app.udva.net",
 ]
 
 if settings.ENVIRONMENT == "development":

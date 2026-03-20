@@ -34,7 +34,7 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-_RETURN_URL = "https://udva.io/dashboard"
+_RETURN_URL = "https://udva.net/dashboard"
 
 # Monthly credits granted per plan on payment.succeeded
 _PLAN_CREDITS: dict[str, int] = {
@@ -341,7 +341,7 @@ async def _handle_payment_failed(email: str) -> None:
             to=email,
             brand_name="your Udva account",
             mention_title="Payment failed — please update your billing details",
-            mention_url="https://app.udva.io/settings",
+            mention_url="https://app.udva.net/settings",
             relevance_score=0,
         )
         logger.info("dodo_client: payment.failed — alert sent to email=%s", email)

@@ -1,7 +1,7 @@
 # Udva — Architecture Reference
 
 > **Product:** Udva — Rise above your competitors in AI search
-> **Domain:** udva.io
+> **Domain:** udva.net
 > **Tagline:** Rise above your competitors in AI search
 >
 > **Purpose:** This file is the single source of truth for Udva's architecture.
@@ -31,7 +31,7 @@
 
 ## 1. Product Overview
 
-**Udva** (udva.io) is a three-pillar SaaS platform for AI search visibility and social monitoring. GEO stands for Generative Engine Optimization — the emerging discipline of making your brand visible and recommended by AI models like ChatGPT, Claude, Perplexity, and Gemini.
+**Udva** (udva.net) is a three-pillar SaaS platform for AI search visibility and social monitoring. GEO stands for Generative Engine Optimization — the emerging discipline of making your brand visible and recommended by AI models like ChatGPT, Claude, Perplexity, and Gemini.
 
 | Pillar | What it does | Key technology |
 |--------|-------------|----------------|
@@ -994,5 +994,5 @@ Uncomment Pillar 3 entries in `celery_app.py` once modules are built.
 ---
 
 *Last updated: 2026-03-20*
-*Product: Udva · Domain: udva.io*
+*Product: Udva · Domain: udva.net*
 *Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway · Next.js 14 · Vercel · Supabase*

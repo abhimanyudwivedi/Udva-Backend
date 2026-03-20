@@ -20,7 +20,7 @@ _FULL_PARSED: dict[str, Any] = {
     "brand_mentioned": True,
     "mention_rank": 1,
     "sentiment": "positive",
-    "cited_urls": ["https://udva.io"],
+    "cited_urls": ["https://udva.net"],
 }
 
 _NOT_MENTIONED: dict[str, Any] = {
@@ -46,7 +46,7 @@ class TestParseResponse:
         assert result["brand_mentioned"] is True
         assert result["mention_rank"] == 1
         assert result["sentiment"] == "positive"
-        assert result["cited_urls"] == ["https://udva.io"]
+        assert result["cited_urls"] == ["https://udva.net"]
 
     async def test_brand_name_injected_into_content(self) -> None:
         """call_parser should receive the brand name prepended to the content."""
