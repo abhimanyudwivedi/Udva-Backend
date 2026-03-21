@@ -11,9 +11,9 @@ import logging
 from typing import Any
 
 import anthropic
-import google.api_core.exceptions
-import google.generativeai as genai
 import openai
+from google import genai
+from google.genai import errors as genai_errors
 
 from app.config import settings
 
@@ -46,6 +46,7 @@ _PARSER_DEFAULT: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 _openai_client: openai.AsyncOpenAI | None = None
 _anthropic_client: anthropic.AsyncAnthropic | None = None
+_gemini_client: genai.Client | None = None
 
 
 def get_openai_client() -> openai.AsyncOpenAI:
@@ -64,13 +65,12 @@ def get_anthropic_client() -> anthropic.AsyncAnthropic:
     return _anthropic_client
 
 
-def get_gemini_model() -> genai.GenerativeModel:
-    """Configure the Google AI SDK and return a GenerativeModel instance.
-
-    ``genai.configure`` is idempotent — safe to call on every request.
-    """
-    genai.configure(api_key=settings.GOOGLE_AI_API_KEY)
-    return genai.GenerativeModel("gemini-2.5-flash")
+def get_gemini_client() -> genai.Client:
+    """Return (or create) the module-level google-genai Client singleton."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.GOOGLE_AI_API_KEY)
+    return _gemini_client
 
 
 # ---------------------------------------------------------------------------
@@ -168,23 +168,14 @@ async def call_gemini(prompt: str) -> str:
     Returns:
         The model's text reply, or ``""`` on error.
     """
-    model = get_gemini_model()
+    client = get_gemini_client()
     try:
-        response = await model.generate_content_async(prompt)
-        return response.text
-    except google.api_core.exceptions.ResourceExhausted as exc:
-        logger.error(
-            "gemini rate_limit model=gemini-2.5-flash prompt_len=%d: %s", len(prompt), exc
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
         )
-    except google.api_core.exceptions.DeadlineExceeded as exc:
-        logger.error(
-            "gemini timeout model=gemini-2.5-flash prompt_len=%d: %s", len(prompt), exc
-        )
-    except google.api_core.exceptions.ServiceUnavailable as exc:
-        logger.error(
-            "gemini unavailable model=gemini-2.5-flash prompt_len=%d: %s", len(prompt), exc
-        )
-    except google.api_core.exceptions.GoogleAPIError as exc:
+        return response.text or ""
+    except genai_errors.APIError as exc:
         logger.error(
             "gemini api_error model=gemini-2.5-flash prompt_len=%d: %s", len(prompt), exc
         )

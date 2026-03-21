@@ -217,71 +217,71 @@ class TestCallClaude:
 # ---------------------------------------------------------------------------
 
 class TestCallGemini:
+    def _make_mock_client(self, return_value=None, side_effect=None) -> MagicMock:
+        mock_client = MagicMock()
+        if side_effect is not None:
+            mock_client.aio.models.generate_content = AsyncMock(side_effect=side_effect)
+        else:
+            mock_client.aio.models.generate_content = AsyncMock(return_value=return_value)
+        return mock_client
+
     async def test_returns_model_text(self) -> None:
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            return_value=_gemini_response("Gemini says hello")
-        )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        mock_client = self._make_mock_client(return_value=_gemini_response("Gemini says hello"))
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             result = await call_gemini("What is Udva?")
         assert result == "Gemini says hello"
 
     async def test_returns_empty_on_resource_exhausted(self) -> None:
-        import google.api_core.exceptions as gexc
+        from google.genai import errors as genai_errors
 
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            side_effect=gexc.ResourceExhausted("quota exceeded")
+        mock_client = self._make_mock_client(
+            side_effect=genai_errors.APIError(429, "quota exceeded")
         )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             result = await call_gemini("prompt")
         assert result == ""
 
     async def test_returns_empty_on_deadline_exceeded(self) -> None:
-        import google.api_core.exceptions as gexc
+        from google.genai import errors as genai_errors
 
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            side_effect=gexc.DeadlineExceeded("deadline exceeded")
+        mock_client = self._make_mock_client(
+            side_effect=genai_errors.APIError(504, "deadline exceeded")
         )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             result = await call_gemini("prompt")
         assert result == ""
 
     async def test_returns_empty_on_service_unavailable(self) -> None:
-        import google.api_core.exceptions as gexc
+        from google.genai import errors as genai_errors
 
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            side_effect=gexc.ServiceUnavailable("service down")
+        mock_client = self._make_mock_client(
+            side_effect=genai_errors.APIError(503, "service down")
         )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             result = await call_gemini("prompt")
         assert result == ""
 
     async def test_returns_empty_on_generic_google_api_error(self) -> None:
-        import google.api_core.exceptions as gexc
+        from google.genai import errors as genai_errors
 
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            side_effect=gexc.GoogleAPIError("unknown error")
+        mock_client = self._make_mock_client(
+            side_effect=genai_errors.APIError(500, "unknown error")
         )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             result = await call_gemini("prompt")
         assert result == ""
 
     async def test_logs_error_on_failure(self, caplog: pytest.LogCaptureFixture) -> None:
-        import google.api_core.exceptions as gexc
+        from google.genai import errors as genai_errors
 
-        mock_model = MagicMock()
-        mock_model.generate_content_async = AsyncMock(
-            side_effect=gexc.ResourceExhausted("quota exceeded")
+        mock_client = self._make_mock_client(
+            side_effect=genai_errors.APIError(429, "quota exceeded")
         )
-        with patch("app.lib.llm_clients.get_gemini_model", return_value=mock_model):
+        with patch("app.lib.llm_clients.get_gemini_client", return_value=mock_client):
             with caplog.at_level("ERROR", logger="app.lib.llm_clients"):
                 await call_gemini("my prompt")
         assert "gemini-2.5-flash" in caplog.text
-        assert "rate_limit" in caplog.text
+        assert "api_error" in caplog.text
 
 
 # ---------------------------------------------------------------------------
