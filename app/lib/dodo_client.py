@@ -208,11 +208,10 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
 
     event_type: str = event.get("type", "")
     data: dict = event.get("data", {})
-    event_payload: dict = data.get("payload", {})
 
-    customer: dict = event_payload.get("customer", {})
+    customer: dict = data.get("customer", {})
     customer_email: str = customer.get("email", "")
-    product_id: str = event_payload.get("product_id", "")
+    product_id: str = data.get("product_id", "")
 
     logger.info("dodo_client: received event type=%s email=%s", event_type, customer_email)
 
