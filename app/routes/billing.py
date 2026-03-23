@@ -13,7 +13,7 @@ from standardwebhooks.webhooks import WebhookVerificationError
 
 from app.database import get_db  # noqa: F401  (kept for potential future use)
 from app.lib.auth import get_current_user
-from app.lib.dodo_client import create_checkout_session, create_topup_checkout, handle_webhook
+from app.lib.dodo_client import cancel_subscription, create_checkout_session, create_topup_checkout, handle_webhook
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,40 @@ async def billing_topup(
 # ---------------------------------------------------------------------------
 # POST /billing/webhook
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Cancel active subscription",
+)
+async def billing_cancel(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Cancel the user's active subscription at the end of the current billing period.
+
+    The plan remains active until the next billing date, then DodoPayments fires
+    ``subscription.cancelled`` which reverts ``user.plan`` to ``"trial"``.
+
+    Raises:
+        HTTPException 400: No active subscription on record.
+        HTTPException 502: DodoPayments API call failed.
+    """
+    try:
+        await cancel_subscription(current_user)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.error("billing/cancel: error user=%s — %s", current_user.email, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Payment provider error — please try again.",
+        ) from exc
+
+    return {"status": "cancelled"}
 
 
 @router.post(

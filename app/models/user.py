@@ -24,10 +24,10 @@ class User(Base):
         String,
         nullable=False,
         default="trial",
-        comment="trial | solo | indie | studio | agency",
+        comment="trial | starter | growth | enterprise",
     )
-    stripe_customer_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    stripe_sub_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    dodo_customer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    dodo_sub_id: Mapped[str | None] = mapped_column(String, nullable=True)
     alert_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     slack_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -212,6 +212,7 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
     customer: dict = data.get("customer", {})
     customer_email: str = customer.get("email", "")
     product_id: str = data.get("product_id", "")
+    subscription_id: str = data.get("subscription_id", "")
 
     logger.info("dodo_client: received event type=%s email=%s", event_type, customer_email)
 
@@ -220,7 +221,7 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
         return
 
     if event_type == "subscription.active":
-        await _handle_subscription_active(customer_email, product_id)
+        await _handle_subscription_active(customer_email, product_id, subscription_id)
 
     elif event_type == "subscription.cancelled":
         await _handle_subscription_cancelled(customer_email)
@@ -240,8 +241,10 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_subscription_active(email: str, product_id: str) -> None:
-    """Set user.plan to the plan corresponding to product_id."""
+async def _handle_subscription_active(
+    email: str, product_id: str, subscription_id: str
+) -> None:
+    """Set user.plan and dodo_sub_id to the plan corresponding to product_id."""
     plan = _product_plan_map().get(product_id)
     if plan is None:
         logger.warning(
@@ -260,16 +263,21 @@ async def _handle_subscription_active(email: str, product_id: str) -> None:
                 return
 
             user.plan = plan
+            if subscription_id:
+                user.dodo_sub_id = subscription_id
             await db.commit()
             logger.info(
-                "dodo_client: subscription.active — updated email=%s plan=%s", email, plan
+                "dodo_client: subscription.active — updated email=%s plan=%s sub_id=%s",
+                email,
+                plan,
+                subscription_id,
             )
     except Exception as exc:  # noqa: BLE001
         logger.error("dodo_client: subscription.active handler error — %s", exc)
 
 
 async def _handle_subscription_cancelled(email: str) -> None:
-    """Revert user.plan to 'trial'."""
+    """Revert user.plan to 'trial' and clear dodo_sub_id."""
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(User).where(User.email == email))
@@ -281,10 +289,32 @@ async def _handle_subscription_cancelled(email: str) -> None:
                 return
 
             user.plan = "trial"
+            user.dodo_sub_id = None
             await db.commit()
             logger.info("dodo_client: subscription.cancelled — reverted email=%s to trial", email)
     except Exception as exc:  # noqa: BLE001
         logger.error("dodo_client: subscription.cancelled handler error — %s", exc)
+
+
+async def cancel_subscription(user: User) -> None:
+    """Cancel the user's active DodoPayments subscription immediately.
+
+    Args:
+        user: The authenticated user requesting cancellation.
+
+    Raises:
+        ValueError: User has no active subscription ID on record.
+        Exception: Propagates any DodoPayments SDK errors to the caller.
+    """
+    if not user.dodo_sub_id:
+        raise ValueError("No active subscription found.")
+
+    client = _get_client()
+    await client.subscriptions.update(
+        user.dodo_sub_id,
+        cancel_at_next_billing_date=True,
+    )
+    logger.info("dodo_client: cancel_subscription — cancelled sub_id=%s email=%s", user.dodo_sub_id, user.email)
 
 
 async def _handle_payment_succeeded(email: str, product_id: str) -> None:
