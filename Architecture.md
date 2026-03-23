@@ -64,8 +64,8 @@
 | Provider | SDK | Model used |
 |----------|-----|-----------|
 | OpenAI | `openai` (official) | `gpt-4o` for queries, `gpt-4o-mini` for parsing |
-| Anthropic | `anthropic` (official) | `claude-sonnet-4-6` for queries, `claude-haiku-4-5-20251001` for parsing |
-| Google | `google-generativeai` | `gemini-2.5-flash` for queries |
+| Anthropic | `anthropic` (official) | `claude-sonnet-4-6` for queries, `claude-haiku-4-5-20251001` for parsing + AI suggestions |
+| Google | `google-genai` | `gemini-2.5-flash` for queries |
 | Perplexity | HTTP (requests) | `sonar-pro` for queries (optional, Growth+ plans) |
 
 ### Data Sources
@@ -82,14 +82,14 @@
 | Framework | Next.js 14 (App Router) | Separate repo: `udva-frontend` |
 | UI components | shadcn/ui + Tailwind CSS | |
 | Charts | Recharts | Visibility score time-series |
-| Auth | NextAuth.js + JWT | Reads tokens from FastAPI backend |
+| Auth | Supabase (ES256 JWKS) | Google OAuth + email; backend verifies via JWKS endpoint |
 
 ### Infrastructure
 | Service | Provider | Notes |
 |---------|----------|-------|
 | Hosting | Railway | App server + workers + DB + Redis in one project |
 | Email | Resend | Transactional alerts, 3K/day free |
-| Payments | Stripe | Subscriptions + credit top-ups |
+| Payments | DodoPayments | Subscriptions + credit top-ups; Standard Webhooks spec |
 | Error tracking | Sentry (free tier) | Python + Next.js SDKs |
 | DNS / SSL | Cloudflare | Free SSL, DDoS protection |
 
@@ -159,7 +159,7 @@ udva-backend/                   # This repo (Python)
 │       ├── reddit_client.py    # PRAW singleton with auth
 │       ├── serper_client.py    # Serper.dev HTTP wrapper
 │       ├── email.py            # Resend integration
-│       └── stripe_client.py   # Stripe webhook handler + billing helpers
+│       └── dodo_client.py     # DodoPayments checkout + webhook handler
 ├── celery_app.py               # Celery app init + beat schedule
 ├── tests/
 │   ├── conftest.py
@@ -196,9 +196,9 @@ CREATE TABLE users (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email       TEXT UNIQUE NOT NULL,
     hashed_pw   TEXT NOT NULL,
-    plan        TEXT NOT NULL DEFAULT 'trial',   -- trial | solo | indie | studio | agency
-    stripe_customer_id TEXT,
-    stripe_sub_id      TEXT,
+    plan        TEXT NOT NULL DEFAULT 'trial',   -- trial | starter | growth | enterprise
+    dodo_customer_id   TEXT,
+    dodo_sub_id        TEXT,
     created_at  TIMESTAMPTZ DEFAULT now(),
     updated_at  TIMESTAMPTZ DEFAULT now()
 );
@@ -640,6 +640,8 @@ GET    /brands/{id}/keywords
 POST   /brands/{id}/keywords
 DELETE /brands/{id}/keywords/{keyword_id}
 
+GET    /brands/{id}/suggestions                 # AI-generated query + keyword suggestions (Haiku)
+
 GET    /brands/{id}/visibility                  # time-series scores, all models
 GET    /brands/{id}/visibility/compare          # brand vs competitors
 GET    /brands/{id}/visibility/citations        # citation sources
@@ -653,8 +655,9 @@ POST   /brands/{id}/campaigns                   # submit engagement order
 GET    /brands/{id}/campaigns/{id}
 GET    /brands/{id}/credits                     # current balance
 
-POST   /billing/webhook                         # Stripe webhook (no auth)
-POST   /billing/topup                           # purchase additional credits
+POST   /billing/webhook                         # DodoPayments webhook (no auth, Standard Webhooks)
+POST   /billing/checkout                        # create subscription checkout session
+POST   /billing/topup                           # create one-time credit top-up checkout
 
 GET    /settings
 PUT    /settings                                # alert threshold, Slack webhook
@@ -689,17 +692,17 @@ app.conf.beat_schedule = {
         "task": "app.tasks.rollup.compute_weekly",
         "schedule": crontab(day_of_week=1, hour=3, minute=0),
     },
-    # Pillar 2 — 6-hour crawl (Studio/Agency plans)
+    # Pillar 2 — 6-hour crawl (Growth/Enterprise plans)
     "crawl-keywords-6h": {
         "task": "app.tasks.reddit_crawler.crawl_active_brands",
         "schedule": crontab(minute=0, hour="*/6"),
-        "kwargs": {"plan_tier": ["studio", "agency"]},
+        "kwargs": {"plan_tier": ["growth", "enterprise"]},
     },
-    # Pillar 2 — 24-hour crawl (Solo/Indie plans)
+    # Pillar 2 — 24-hour crawl (Starter plan)
     "crawl-keywords-24h": {
         "task": "app.tasks.reddit_crawler.crawl_active_brands",
         "schedule": crontab(hour=8, minute=0),
-        "kwargs": {"plan_tier": ["solo", "indie"]},
+        "kwargs": {"plan_tier": ["starter"]},
     },
     # Pillar 3 — account warming (daily)
     "warm-accounts": {
@@ -737,27 +740,28 @@ def my_task(self, ...):
 ## 10. Authentication & Billing
 
 ### Auth flow
-1. User registers → password hashed with `bcrypt`
-2. Login → returns `access_token` (JWT, 30min) + `refresh_token` (7 days)
-3. All protected routes require `Authorization: Bearer <token>`
-4. Token carries: `user_id`, `plan`, `exp`
+1. User signs in via Supabase (Google OAuth or email/password)
+2. Supabase issues an **ES256** JWT (elliptic curve — not HS256)
+3. Frontend attaches JWT as `Authorization: Bearer <token>` on every API call
+4. Backend fetches JWKS from `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` (cached in memory) and verifies the token signature
+5. On first login, backend auto-provisions a `User` row with `plan=trial`
+6. Token carries: `sub` (Supabase user UUID), `email`, `exp`
 
-### Stripe plan mapping
-| Plan slug | Stripe Price ID | Monthly USD | Brands | LLM models | Keywords |
-|-----------|----------------|-------------|--------|-----------|----------|
-| `trial` | — | $0 (7 days) | 1 | 2 | 10 |
-| `solo` | `price_solo` | $29 | 1 | 2 | 10 |
-| `indie` | `price_indie` | $49 | 1 | 3 | 20 |
-| `studio` | `price_studio` | $89 | 3 | 4 | 75 |
-| `agency` | `price_agency` | $149 | 10 | 5 | 200 |
+### DodoPayments plan mapping
+| Plan slug | DodoPayments Product | Monthly USD | Brands | AI Queries | Keywords | Credits/mo |
+|-----------|---------------------|-------------|--------|-----------|----------|------------|
+| `trial` | — | $0 | 1 | 10 | 10 | 0 |
+| `starter` | `DODO_PRODUCT_STARTER` | $49 | 1 | 20 | 20 | $50 |
+| `growth` | `DODO_PRODUCT_GROWTH` | $199 | 3 | 75 | 75 | $200 |
+| `enterprise` | `DODO_PRODUCT_ENTERPRISE` | $299 | 10 | 200 | 200 | $300 |
 
-### Stripe webhook events handled
-- `customer.subscription.created` → activate plan, grant credits
-- `customer.subscription.updated` → upgrade/downgrade
-- `customer.subscription.deleted` → downgrade to free/locked
-- `invoice.payment_succeeded` → grant monthly credits
-- `invoice.payment_failed` → send failed payment email
-- `checkout.session.completed` → one-time credit top-up
+### DodoPayments webhook events handled (`app/lib/dodo_client.py`)
+- `subscription.active` → set `user.plan` in DB
+- `subscription.cancelled` → revert `user.plan` to `"trial"`
+- `payment.succeeded` → insert `CreditLedger` row (reason=`"plan_credit"`)
+- `payment.failed` → send alert email to user
+
+Webhook signature verified via **Standard Webhooks** spec using `DODO_WEBHOOK_SECRET`.
 
 ---
 
@@ -816,19 +820,19 @@ REDDIT_CLIENT_SECRET=...
 REDDIT_USER_AGENT=udva/1.0
 SERPER_API_KEY=...
 
-# Auth
-JWT_SECRET_KEY=...                    # 64-char random hex
+# Auth — Supabase (ES256 JWKS)
+SUPABASE_URL=https://rxelozvirnepcijnwlhi.supabase.co
+SUPABASE_JWT_SECRET=...              # kept for reference, not used for verification
+JWT_SECRET_KEY=...                   # 64-char random hex (internal tokens)
 JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# Payments
-STRIPE_SECRET_KEY=sk_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PRICE_SOLO=price_...
-STRIPE_PRICE_INDIE=price_...
-STRIPE_PRICE_STUDIO=price_...
-STRIPE_PRICE_AGENCY=price_...
+# Payments — DodoPayments
+DODO_PAYMENTS_API_KEY=...
+DODO_WEBHOOK_SECRET=...
+DODO_ENVIRONMENT=test_mode           # switch to live_mode when ready
+DODO_PRODUCT_STARTER=...
+DODO_PRODUCT_GROWTH=...
+DODO_PRODUCT_ENTERPRISE=...
 
 # Email
 RESEND_API_KEY=re_...
@@ -906,74 +910,52 @@ Build [X] with:
 
 ---
 
-## 15. Next Steps (pick up here — 2026-03-20)
+## 15. Next Steps (pick up here — 2026-03-23)
 
 ### Status snapshot
 | Layer | Status |
 |-------|--------|
 | Backend (Pillars 1 + 2) | ✅ Live on Railway |
-| Frontend (Next.js 14) | ✅ Built locally, **not yet deployed** |
-| Backend ↔ Frontend auth | ✅ Connected via Supabase JWT |
-| Google OAuth | ⏳ Needs Google Cloud credentials |
-| Vercel deployment | ⏳ Ready to deploy |
+| Frontend (Next.js 14) | ✅ Live on Vercel — https://udva.net |
+| Backend ↔ Frontend auth | ✅ ES256 JWKS verification working |
+| Google OAuth | ✅ Configured and working |
+| DNS / SSL | ✅ Cloudflare → Vercel, SSL active |
+| Smoke test (sign-in → brand → dashboard) | ✅ Passing |
+| AI suggestions endpoint | ✅ `GET /brands/{id}/suggestions` live |
+| Billing page | ✅ Starter $49 / Growth $199 / Enterprise $299 |
+| DodoPayments webhook handler | ✅ Code complete, test_mode |
 
 ---
 
-### Step 1 — Deploy frontend to Vercel (30 min)
+### Step 1 — Complete DodoPayments integration
 
-**a. Google Cloud OAuth credentials**
-1. console.cloud.google.com → APIs & Services → Credentials → Create OAuth client ID
-2. Application type: Web application
-3. Authorized redirect URI: `https://dzspepexggkqjwjbkidn.supabase.co/auth/v1/callback`
-4. Copy Client ID + Client Secret
-5. Supabase dashboard → Authentication → Providers → Google → paste both → enable
+User is creating products in the DodoPayments dashboard. Once product IDs are available:
 
-**b. Deploy**
-```bash
-cd /Users/abhimanyudwivedi/Documents/udva-frontend
-npm install -g vercel   # if not installed
-vercel env add NEXT_PUBLIC_SUPABASE_URL production
-vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
-vercel env add NEXT_PUBLIC_API_URL production   # https://udva-backend-production.up.railway.app
-vercel --prod
-```
-
-**c. Post-deploy — Supabase redirect URL**
-- Supabase dashboard → Authentication → URL Configuration
-- Site URL: `https://your-app.vercel.app`
-- Redirect URLs: add `https://your-app.vercel.app/auth/callback`
-
-**d. Railway — add missing env var**
-- Add `SUPABASE_JWT_SECRET` → value from Supabase dashboard → Settings → API → JWT Secret
-- Railway will auto-redeploy the backend
+1. Add to Railway env vars: `DODO_PRODUCT_STARTER`, `DODO_PRODUCT_GROWTH`, `DODO_PRODUCT_ENTERPRISE`
+2. In `app/routes/billing.py`: ensure `POST /billing/checkout` accepts `{"plan": "starter"|"growth"|"enterprise"}` and returns `{"url": "<checkout_url>"}`
+3. In `udva-frontend/app/dashboard/billing/page.tsx`: wire upgrade buttons to call `POST /billing/checkout`, redirect to returned URL
+4. Change `DODO_ENVIRONMENT=live_mode` when ready to accept real payments
+5. Configure webhook URL in DodoPayments dashboard: `https://udva-backend-production.up.railway.app/billing/webhook`
 
 ---
 
-### Step 2 — End-to-end smoke test
+### Step 2 — Onboarding flow (after DodoPayments)
 
-1. Open Vercel URL → sign up with Google
-2. Check Railway logs — should see `Auto-provisioned user <uuid> (<email>)`
-3. Add a brand → add a query → check `/dashboard` loads visibility chart
-4. Check `/dashboard/brands` CRUD works
+Build a guided onboarding experience for new users:
+1. Welcome screen → explain what Udva does
+2. Add first brand (name + domain)
+3. Auto-populate AI queries and keywords from suggestions endpoint
+4. Show sample dashboard with placeholder data
+5. Prompt to upgrade when trial limits hit
 
 ---
 
-### Step 3 — Pending backend items
+### Step 3 — Reddit API + Social Listening
 
 **Reddit API** (waiting for approval)
-- Once approved: update Reddit credentials in Railway env vars
-- `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` → replace placeholders
-
-**DodoPayments**
-- Create products in DodoPayments dashboard for each plan
-- Update Railway: `DODO_PRODUCT_SOLO`, `DODO_PRODUCT_INDIE`, `DODO_PRODUCT_STUDIO`, `DODO_PRODUCT_AGENCY`
-- Change `DODO_ENVIRONMENT=live_mode` when ready to accept payments
-
-**Campaigns API (Pillar 3 entry point)**
-- `app/schemas/campaign.py` — CampaignCreate, CampaignResponse schemas
-- `app/routes/campaigns.py` — POST /brands/{id}/campaigns, GET status
-- Register router in `app/main.py`
-- Build only after revenue is flowing
+- Once approved: replace placeholders in Railway env vars
+- `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` → real credentials
+- Verify `crawl_active_brands` Celery task fires correctly
 
 ---
 
@@ -993,6 +975,6 @@ Uncomment Pillar 3 entries in `celery_app.py` once modules are built.
 
 ---
 
-*Last updated: 2026-03-20*
+*Last updated: 2026-03-23*
 *Product: Udva · Domain: udva.net*
-*Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway · Next.js 14 · Vercel · Supabase*
+*Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway · Next.js 14 · Vercel · Supabase · DodoPayments*

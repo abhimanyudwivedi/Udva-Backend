@@ -63,10 +63,21 @@ def _product_plan_map() -> dict[str, str]:
     Built at call-time so settings are always current (relevant for tests).
     """
     return {
-        settings.DODO_PRODUCT_SOLO: "solo",
-        settings.DODO_PRODUCT_INDIE: "indie",
-        settings.DODO_PRODUCT_STUDIO: "studio",
-        settings.DODO_PRODUCT_AGENCY: "agency",
+        settings.DODO_PRODUCT_STARTER: "starter",
+        settings.DODO_PRODUCT_GROWTH: "growth",
+        settings.DODO_PRODUCT_ENTERPRISE: "enterprise",
+    }
+
+
+def _plan_product_map() -> dict[str, str]:
+    """Return a mapping of plan slugs → DodoPayments product IDs.
+
+    Built at call-time so settings are always current (relevant for tests).
+    """
+    return {
+        "starter": settings.DODO_PRODUCT_STARTER,
+        "growth": settings.DODO_PRODUCT_GROWTH,
+        "enterprise": settings.DODO_PRODUCT_ENTERPRISE,
     }
 
 
@@ -104,19 +115,24 @@ def _verify_webhook(payload: bytes, headers: dict[str, str]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def create_checkout_session(user: User, product_id: str) -> str:
+async def create_checkout_session(user: User, plan: str) -> str:
     """Create a DodoPayments subscription checkout and return the checkout URL.
 
     Args:
-        user:       The authenticated user initiating the checkout.
-        product_id: DodoPayments product ID for the chosen plan.
+        user: The authenticated user initiating the checkout.
+        plan: Plan slug — ``"starter"``, ``"growth"``, or ``"enterprise"``.
 
     Returns:
         Hosted checkout URL (``payment_link``) to redirect the user to.
 
     Raises:
+        ValueError: Unknown plan slug.
         Exception: Propagates any DodoPayments SDK errors to the caller.
     """
+    product_id = _plan_product_map().get(plan)
+    if not product_id:
+        raise ValueError(f"Unknown plan slug or product ID not configured: {plan!r}")
+
     client = _get_client()
 
     result = await client.subscriptions.create(
@@ -134,8 +150,9 @@ async def create_checkout_session(user: User, product_id: str) -> str:
     )
 
     logger.info(
-        "dodo_client: subscription checkout created user=%s product_id=%s",
+        "dodo_client: subscription checkout created user=%s plan=%s product_id=%s",
         user.email,
+        plan,
         product_id,
     )
     return result.payment_link  # type: ignore[no-any-return]

@@ -26,9 +26,15 @@ router = APIRouter()
 
 
 class CheckoutRequest(BaseModel):
-    """Body for POST /billing/checkout and POST /billing/topup."""
+    """Body for POST /billing/checkout."""
 
-    product_id: str
+    plan: str  # "starter" | "growth" | "enterprise"
+
+
+class TopupRequest(BaseModel):
+    """Body for POST /billing/topup."""
+
+    product_id: str  # raw DodoPayments product ID for the credit package
 
 
 class CheckoutResponse(BaseModel):
@@ -58,16 +64,22 @@ async def billing_checkout(
     updates ``user.plan`` in the database.
 
     Args:
-        body: ``{product_id}`` — DodoPayments product ID for the chosen plan.
+        body: ``{plan}`` — plan slug: ``"starter"``, ``"growth"``, or ``"enterprise"``.
 
     Raises:
+        HTTPException 400: Unknown plan slug.
         HTTPException 502: DodoPayments API call failed.
     """
     try:
         checkout_url = await create_checkout_session(
             user=current_user,
-            product_id=body.product_id,
+            plan=body.plan,
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         logger.error(
             "billing/checkout: DodoPayments error user=%s — %s", current_user.email, exc
@@ -91,7 +103,7 @@ async def billing_checkout(
     summary="Create credit top-up checkout",
 )
 async def billing_topup(
-    body: CheckoutRequest,
+    body: TopupRequest,
     current_user: User = Depends(get_current_user),
 ) -> CheckoutResponse:
     """Create a one-time DodoPayments checkout for purchasing additional credits.

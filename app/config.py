@@ -75,10 +75,9 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     DODO_PAYMENTS_API_KEY: str = Field(description="DodoPayments API key")
     DODO_WEBHOOK_SECRET: str = Field(description="DodoPayments webhook signing secret (standardwebhooks)")
-    DODO_PRODUCT_SOLO: str = Field(default="", description="DodoPayments product ID for Solo plan")
-    DODO_PRODUCT_INDIE: str = Field(default="", description="DodoPayments product ID for Indie plan")
-    DODO_PRODUCT_STUDIO: str = Field(default="", description="DodoPayments product ID for Studio plan")
-    DODO_PRODUCT_AGENCY: str = Field(default="", description="DodoPayments product ID for Agency plan")
+    DODO_PRODUCT_STARTER: str = Field(default="", description="DodoPayments product ID for Starter plan ($49/mo)")
+    DODO_PRODUCT_GROWTH: str = Field(default="", description="DodoPayments product ID for Growth plan ($199/mo)")
+    DODO_PRODUCT_ENTERPRISE: str = Field(default="", description="DodoPayments product ID for Enterprise plan ($299/mo)")
     DODO_ENVIRONMENT: str = Field(
         default="test_mode",
         description="DodoPayments environment: test_mode | live_mode",
