@@ -299,21 +299,48 @@ async def _handle_subscription_cancelled(email: str) -> None:
         logger.error("dodo_client: subscription.cancelled handler error — %s", exc)
 
 
-async def get_customer_portal_link(user: User) -> str:
-    """Return a DodoPayments customer portal URL for the user.
+async def get_subscription_details(user: User) -> dict:
+    """Fetch the user's active subscription details and recent payment history.
 
-    The portal lets customers view invoices, update payment method, and
-    manage their subscription.
+    Returns a dict with subscription info and a list of recent invoices.
 
     Raises:
-        ValueError: User has no DodoPayments customer ID on record.
+        ValueError: User has no active subscription on record.
     """
-    if not user.dodo_customer_id:
-        raise ValueError("No billing account found. Please complete a purchase first.")
+    if not user.dodo_sub_id:
+        raise ValueError("No active subscription found.")
 
     client = _get_client()
-    session = await client.customers.customer_portal.create(user.dodo_customer_id)
-    return session.link  # type: ignore[no-any-return]
+
+    sub = await client.subscriptions.retrieve(user.dodo_sub_id)
+
+    payments_page = await client.payments.list(
+        subscription_id=user.dodo_sub_id,
+        page_size=10,
+    )
+    payments = payments_page.items if hasattr(payments_page, "items") else []
+
+    invoices = [
+        {
+            "id": p.payment_id,
+            "date": p.created_at.isoformat() if p.created_at else None,
+            "amount": p.total_amount,
+            "currency": p.currency,
+            "status": p.status,
+            "invoice_url": p.invoice_url,
+        }
+        for p in payments
+    ]
+
+    return {
+        "plan": _product_plan_map().get(sub.product_id, sub.product_id),
+        "status": sub.status,
+        "next_billing_date": sub.next_billing_date.isoformat() if sub.next_billing_date else None,
+        "amount": sub.recurring_pre_tax_amount,
+        "currency": sub.currency,
+        "cancel_at_next_billing_date": sub.cancel_at_next_billing_date,
+        "invoices": invoices,
+    }
 
 
 async def cancel_subscription(user: User) -> None:
