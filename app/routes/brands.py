@@ -54,11 +54,10 @@ router = APIRouter()
 # Query limits are not defined in the Architecture plan table; these are
 # sensible per-tier values that scale with keyword limits.
 _PLAN_LIMITS: dict[str, dict[str, int]] = {
-    "trial":  {"brands": 1,  "keywords": 10,  "queries": 10},
-    "solo":   {"brands": 1,  "keywords": 10,  "queries": 10},
-    "indie":  {"brands": 1,  "keywords": 20,  "queries": 20},
-    "studio": {"brands": 3,  "keywords": 75,  "queries": 50},
-    "agency": {"brands": 10, "keywords": 200, "queries": 100},
+    "trial":      {"brands": 1,  "keywords": 10,  "queries": 10},
+    "starter":    {"brands": 1,  "keywords": 20,  "queries": 20},
+    "growth":     {"brands": 3,  "keywords": 75,  "queries": 75},
+    "enterprise": {"brands": 10, "keywords": 200, "queries": 200},
 }
 
 _DEFAULT_LIMITS: dict[str, int] = {"brands": 1, "keywords": 10, "queries": 10}

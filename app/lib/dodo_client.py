@@ -38,10 +38,9 @@ _RETURN_URL = "https://udva.net/dashboard"
 
 # Monthly credits granted per plan on payment.succeeded
 _PLAN_CREDITS: dict[str, int] = {
-    "solo": 100,
-    "indie": 250,
-    "studio": 750,
-    "agency": 2000,
+    "starter": 50,
+    "growth": 200,
+    "enterprise": 300,
 }
 
 
