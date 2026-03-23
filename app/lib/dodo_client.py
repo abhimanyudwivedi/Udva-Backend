@@ -211,6 +211,7 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
 
     customer: dict = data.get("customer", {})
     customer_email: str = customer.get("email", "")
+    customer_id: str = customer.get("customer_id", "")
     product_id: str = data.get("product_id", "")
     subscription_id: str = data.get("subscription_id", "")
 
@@ -221,7 +222,7 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
         return
 
     if event_type == "subscription.active":
-        await _handle_subscription_active(customer_email, product_id, subscription_id)
+        await _handle_subscription_active(customer_email, product_id, subscription_id, customer_id)
 
     elif event_type == "subscription.cancelled":
         await _handle_subscription_cancelled(customer_email)
@@ -242,9 +243,9 @@ async def handle_webhook(payload: bytes, headers: dict[str, str]) -> None:
 
 
 async def _handle_subscription_active(
-    email: str, product_id: str, subscription_id: str
+    email: str, product_id: str, subscription_id: str, customer_id: str
 ) -> None:
-    """Set user.plan and dodo_sub_id to the plan corresponding to product_id."""
+    """Set user.plan, dodo_sub_id, and dodo_customer_id."""
     plan = _product_plan_map().get(product_id)
     if plan is None:
         logger.warning(
@@ -265,6 +266,8 @@ async def _handle_subscription_active(
             user.plan = plan
             if subscription_id:
                 user.dodo_sub_id = subscription_id
+            if customer_id:
+                user.dodo_customer_id = customer_id
             await db.commit()
             logger.info(
                 "dodo_client: subscription.active — updated email=%s plan=%s sub_id=%s",
@@ -294,6 +297,23 @@ async def _handle_subscription_cancelled(email: str) -> None:
             logger.info("dodo_client: subscription.cancelled — reverted email=%s to trial", email)
     except Exception as exc:  # noqa: BLE001
         logger.error("dodo_client: subscription.cancelled handler error — %s", exc)
+
+
+async def get_customer_portal_link(user: User) -> str:
+    """Return a DodoPayments customer portal URL for the user.
+
+    The portal lets customers view invoices, update payment method, and
+    manage their subscription.
+
+    Raises:
+        ValueError: User has no DodoPayments customer ID on record.
+    """
+    if not user.dodo_customer_id:
+        raise ValueError("No billing account found. Please complete a purchase first.")
+
+    client = _get_client()
+    session = await client.customers.customer_portal.create(user.dodo_customer_id)
+    return session.link  # type: ignore[no-any-return]
 
 
 async def cancel_subscription(user: User) -> None:

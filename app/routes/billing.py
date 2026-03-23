@@ -13,7 +13,7 @@ from standardwebhooks.webhooks import WebhookVerificationError
 
 from app.database import get_db  # noqa: F401  (kept for potential future use)
 from app.lib.auth import get_current_user
-from app.lib.dodo_client import cancel_subscription, create_checkout_session, create_topup_checkout, handle_webhook
+from app.lib.dodo_client import cancel_subscription, create_checkout_session, create_topup_checkout, get_customer_portal_link, handle_webhook
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,36 @@ async def billing_topup(
 # ---------------------------------------------------------------------------
 # POST /billing/webhook
 # ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/portal",
+    summary="Get customer portal URL",
+)
+async def billing_portal(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Return a DodoPayments customer portal link.
+
+    The portal shows invoices, billing history, and lets the user update
+    their payment method.
+
+    Raises:
+        HTTPException 400: No billing account found.
+        HTTPException 502: DodoPayments API call failed.
+    """
+    try:
+        link = await get_customer_portal_link(current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("billing/portal: error user=%s — %s", current_user.email, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Payment provider error — please try again.",
+        ) from exc
+
+    return {"url": link}
 
 
 @router.post(
