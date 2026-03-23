@@ -16,9 +16,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
+import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import ExpiredSignatureError, JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwk, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,25 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 _bearer_scheme = HTTPBearer()
+
+# ---------------------------------------------------------------------------
+# Supabase JWKS cache (fetched once, reused for all token verifications)
+# ---------------------------------------------------------------------------
+
+_supabase_jwks: list[dict] | None = None
+
+
+async def _get_supabase_jwks() -> list[dict]:
+    """Fetch and cache the Supabase JWKS public keys."""
+    global _supabase_jwks
+    if _supabase_jwks is None:
+        jwks_url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(jwks_url)
+            resp.raise_for_status()
+            _supabase_jwks = resp.json()["keys"]
+        logger.info("Fetched %d Supabase JWKS key(s)", len(_supabase_jwks))
+    return _supabase_jwks
 
 # ---------------------------------------------------------------------------
 # Password helpers
@@ -135,20 +155,40 @@ async def get_current_user(
         HTTPException 401: If the token is invalid, expired, or missing sub.
     """
     try:
-        payload = jwt.decode(
-            credentials.credentials,
-            settings.SUPABASE_JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_aud": False},
-        )
-    except ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except JWTError as exc:
-        logger.warning("Supabase JWT decode failure: %s", exc)
+        keys = await _get_supabase_jwks()
+        # Try each key in the JWKS until one verifies the token
+        payload: dict[str, Any] | None = None
+        last_exc: Exception | None = None
+        for key_data in keys:
+            try:
+                public_key = jwk.construct(key_data)
+                payload = jwt.decode(
+                    credentials.credentials,
+                    public_key,
+                    algorithms=[key_data.get("alg", "ES256")],
+                    options={"verify_aud": False},
+                )
+                break
+            except ExpiredSignatureError:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has expired",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            except JWTError as exc:
+                last_exc = exc
+                continue
+        if payload is None:
+            logger.warning("Supabase JWT decode failure: %s", last_exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Supabase JWKS fetch/decode error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",

@@ -54,6 +54,7 @@ ALLOWED_ORIGINS = [
     "https://udva.net",
     "https://www.udva.net",
     "https://app.udva.net",
+    "https://udva-frontend.vercel.app",
 ]
 
 if settings.ENVIRONMENT == "development":
