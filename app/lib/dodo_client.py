@@ -52,7 +52,7 @@ _PLAN_CREDITS: dict[str, int] = {
 def _get_client() -> AsyncDodoPayments:
     """Return a configured AsyncDodoPayments instance."""
     return AsyncDodoPayments(
-        bearer_auth=settings.DODO_PAYMENTS_API_KEY,
+        bearer_token=settings.DODO_PAYMENTS_API_KEY,
         environment=settings.DODO_ENVIRONMENT,
     )
 
