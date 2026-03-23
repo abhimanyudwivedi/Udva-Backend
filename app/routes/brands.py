@@ -12,15 +12,19 @@ Plan limits enforced:
     agency        — 10 brands, 200 keywords, 100 queries
 """
 
+import json
+import re
 import uuid
 import logging
 
+import anthropic as _anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.lib.auth import get_current_user
+from app.lib.llm_clients import get_anthropic_client
 from app.models.brand import Brand
 from app.models.keyword import Keyword
 from app.models.query import Query as QueryModel
@@ -36,6 +40,7 @@ from app.schemas.brand import (
     PaginatedQueries,
     QueryCreate,
     QueryResponse,
+    SuggestionsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -519,3 +524,81 @@ async def delete_keyword(
 
     keyword.is_active = False
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Suggestions
+# ---------------------------------------------------------------------------
+
+_SUGGESTIONS_SYSTEM = (
+    "You are a marketing assistant. Return ONLY valid JSON with no markdown, "
+    "no preamble, no explanation. The JSON must have exactly two keys: "
+    '"queries" (array of 3 strings) and "keywords" (array of 3 strings).'
+)
+
+
+def _parse_suggestions(raw: str) -> dict[str, list[str]] | None:
+    """Extract queries/keywords dict from LLM output, handling markdown fences."""
+    stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.DOTALL)
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    queries = parsed.get("queries")
+    keywords = parsed.get("keywords")
+    if not isinstance(queries, list) or not isinstance(keywords, list):
+        return None
+    return {
+        "queries": [str(q).strip() for q in queries if str(q).strip()][:5],
+        "keywords": [str(k).strip() for k in keywords if str(k).strip()][:5],
+    }
+
+
+@router.get("/{brand_id}/suggestions", response_model=SuggestionsResponse,
+            summary="Get AI-generated query and keyword suggestions")
+async def get_suggestions(
+    brand_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuggestionsResponse:
+    """Return LLM-generated suggestions for AI queries and keywords for a brand.
+
+    Calls Claude Haiku once with the brand name and domain. Returns empty lists
+    on LLM failure so the frontend can fall back to hardcoded templates.
+
+    Raises:
+        HTTPException 404: Brand not found or belongs to another user.
+    """
+    brand = await _get_brand_or_404(brand_id, current_user, db)
+
+    domain_hint = f" (website: {brand.domain})" if brand.domain else ""
+    prompt = (
+        f'Generate suggestions for a brand called "{brand.name}"{domain_hint}.\n\n'
+        "Return exactly this JSON with no other text:\n"
+        '{"queries": ["...", "...", "..."], "keywords": ["...", "...", "..."]}'
+    )
+
+    raw = ""
+    try:
+        client = get_anthropic_client()
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=_SUGGESTIONS_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        first = response.content[0]
+        raw = first.text if hasattr(first, "text") else ""
+    except _anthropic.AnthropicError as exc:
+        logger.warning("get_suggestions: anthropic error brand_id=%s: %s", brand_id, exc)
+
+    parsed = _parse_suggestions(raw) if raw else None
+    if parsed is None:
+        logger.warning("get_suggestions: parse failed brand_id=%s raw=%.200r", brand_id, raw)
+        return SuggestionsResponse(queries=[], keywords=[])
+
+    logger.info(
+        "get_suggestions: brand_id=%s queries=%d keywords=%d",
+        brand_id, len(parsed["queries"]), len(parsed["keywords"]),
+    )
+    return SuggestionsResponse(queries=parsed["queries"], keywords=parsed["keywords"])

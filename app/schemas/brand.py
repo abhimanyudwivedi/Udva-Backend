@@ -115,3 +115,15 @@ class PaginatedKeywords(BaseModel):
     total: int
     page: int
     limit: int
+
+
+# ---------------------------------------------------------------------------
+# Suggestions
+# ---------------------------------------------------------------------------
+
+
+class SuggestionsResponse(BaseModel):
+    """LLM-generated query and keyword suggestions for a brand."""
+
+    queries: list[str]
+    keywords: list[str]
