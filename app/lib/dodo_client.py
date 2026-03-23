@@ -118,15 +118,18 @@ def _verify_webhook(payload: bytes, headers: dict[str, str]) -> dict:
 async def create_checkout_session(user: User, plan: str) -> str:
     """Create a DodoPayments subscription checkout and return the checkout URL.
 
+    Uses ``checkout_sessions.create()`` with ``subscription_data`` so the
+    hosted checkout page handles payment collection and subscription creation.
+
     Args:
         user: The authenticated user initiating the checkout.
         plan: Plan slug — ``"starter"``, ``"growth"``, or ``"enterprise"``.
 
     Returns:
-        Hosted checkout URL (``payment_link``) to redirect the user to.
+        Hosted checkout URL to redirect the user to.
 
     Raises:
-        ValueError: Unknown plan slug.
+        ValueError: Unknown plan slug or product ID not configured.
         Exception: Propagates any DodoPayments SDK errors to the caller.
     """
     product_id = _plan_product_map().get(plan)
@@ -135,17 +138,9 @@ async def create_checkout_session(user: User, plan: str) -> str:
 
     client = _get_client()
 
-    result = await client.subscriptions.create(
-        billing={
-            "city": "",
-            "country": "US",
-            "state": "",
-            "street": "",
-            "zipcode": "",
-        },
-        customer={"email": user.email, "name": user.email},
-        product_id=product_id,
-        quantity=1,
+    result = await client.checkout_sessions.create(
+        product_cart=[{"product_id": product_id, "quantity": 1}],
+        customer={"email": user.email},
         return_url=_RETURN_URL,
     )
 
@@ -155,11 +150,11 @@ async def create_checkout_session(user: User, plan: str) -> str:
         plan,
         product_id,
     )
-    return result.payment_link  # type: ignore[no-any-return]
+    return result.checkout_url  # type: ignore[no-any-return]
 
 
 async def create_topup_checkout(user: User, product_id: str) -> str:
-    """Create a one-time DodoPayments payment checkout for a credit top-up.
+    """Create a one-time DodoPayments checkout for a credit top-up.
 
     Args:
         user:       The authenticated user purchasing credits.
@@ -173,16 +168,9 @@ async def create_topup_checkout(user: User, product_id: str) -> str:
     """
     client = _get_client()
 
-    result = await client.payments.create(
-        billing={
-            "city": "",
-            "country": "US",
-            "state": "",
-            "street": "",
-            "zipcode": "",
-        },
-        customer={"email": user.email, "name": user.email},
+    result = await client.checkout_sessions.create(
         product_cart=[{"product_id": product_id, "quantity": 1}],
+        customer={"email": user.email},
         return_url=_RETURN_URL,
     )
 
@@ -191,7 +179,7 @@ async def create_topup_checkout(user: User, product_id: str) -> str:
         user.email,
         product_id,
     )
-    return result.payment_link  # type: ignore[no-any-return]
+    return result.checkout_url  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
