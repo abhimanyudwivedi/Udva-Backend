@@ -20,4 +20,4 @@ ENV PORT=8000
 #   beat:   celery -A celery_app beat --loglevel=info
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
