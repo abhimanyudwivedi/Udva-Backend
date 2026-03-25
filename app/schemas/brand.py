@@ -127,3 +127,51 @@ class SuggestionsResponse(BaseModel):
 
     queries: list[str]
     keywords: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Competitors
+# ---------------------------------------------------------------------------
+
+
+class CompetitorCreate(BaseModel):
+    """Payload for POST /brands/{id}/competitors — bulk save from onboarding."""
+
+    names: list[str] = Field(min_length=1, max_length=10)
+
+
+class CompetitorResponse(BaseModel):
+    """Public competitor representation."""
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    name: str
+
+
+class CompetitorSuggestionsResponse(BaseModel):
+    """LLM-generated competitor name suggestions for a brand."""
+
+    competitors: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Onboarding scan
+# ---------------------------------------------------------------------------
+
+
+class OnboardingScanResult(BaseModel):
+    """Result from one AI model during the onboarding scan."""
+
+    model: str           # internal key: chatgpt | claude | gemini
+    display_name: str    # human-readable: ChatGPT | Claude | Gemini
+    mentioned: bool
+    response_snippet: str  # first ~300 chars, blurred on frontend
+
+
+class OnboardingScanResponse(BaseModel):
+    """Full onboarding scan response across all models."""
+
+    brand_name: str
+    prompt_used: str
+    results: list[OnboardingScanResult]

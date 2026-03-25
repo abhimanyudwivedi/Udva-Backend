@@ -17,6 +17,8 @@ import re
 import uuid
 import logging
 
+import asyncio
+
 import anthropic as _anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -24,8 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.lib.auth import get_current_user
-from app.lib.llm_clients import get_anthropic_client
+from app.lib.llm_clients import call_claude, call_gemini, call_openai, get_anthropic_client
 from app.models.brand import Brand
+from app.models.competitor import Competitor
 from app.models.keyword import Keyword
 from app.models.query import Query as QueryModel
 from app.models.user import User
@@ -33,8 +36,13 @@ from app.schemas.brand import (
     BrandCreate,
     BrandResponse,
     BrandUpdate,
+    CompetitorCreate,
+    CompetitorResponse,
+    CompetitorSuggestionsResponse,
     KeywordCreate,
     KeywordResponse,
+    OnboardingScanResponse,
+    OnboardingScanResult,
     PaginatedBrands,
     PaginatedKeywords,
     PaginatedQueries,
@@ -601,3 +609,196 @@ async def get_suggestions(
         brand_id, len(parsed["queries"]), len(parsed["keywords"]),
     )
     return SuggestionsResponse(queries=parsed["queries"], keywords=parsed["keywords"])
+
+
+# ---------------------------------------------------------------------------
+# Competitor suggestions + save
+# ---------------------------------------------------------------------------
+
+_COMPETITOR_SYSTEM = (
+    "You are a market research assistant. Return ONLY valid JSON with no markdown, "
+    "no preamble, no explanation. The JSON must have exactly one key: "
+    '"competitors" (array of 5 competitor brand name strings).'
+)
+
+
+@router.get(
+    "/{brand_id}/competitor-suggestions",
+    response_model=CompetitorSuggestionsResponse,
+    summary="Get AI-generated competitor suggestions",
+)
+async def get_competitor_suggestions(
+    brand_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CompetitorSuggestionsResponse:
+    """Return 5 LLM-generated competitor name suggestions for a brand.
+
+    Calls Claude Haiku with brand name + domain. Returns empty list on failure.
+
+    Raises:
+        HTTPException 404: Brand not found or belongs to another user.
+    """
+    brand = await _get_brand_or_404(brand_id, current_user, db)
+
+    domain_hint = f" (website: {brand.domain})" if brand.domain else ""
+    prompt = (
+        f'List 5 direct competitors for a brand called "{brand.name}"{domain_hint}.\n\n'
+        'Return exactly this JSON with no other text:\n'
+        '{"competitors": ["Competitor A", "Competitor B", "Competitor C", "Competitor D", "Competitor E"]}'
+    )
+
+    raw = ""
+    try:
+        client = get_anthropic_client()
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            system=_COMPETITOR_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        first = response.content[0]
+        raw = first.text if hasattr(first, "text") else ""
+    except _anthropic.AnthropicError as exc:
+        logger.warning("get_competitor_suggestions: anthropic error brand_id=%s: %s", brand_id, exc)
+
+    if raw:
+        stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.DOTALL)
+        try:
+            parsed = json.loads(stripped)
+            competitors = parsed.get("competitors")
+            if isinstance(competitors, list):
+                names = [str(c).strip() for c in competitors if str(c).strip()][:5]
+                logger.info("get_competitor_suggestions: brand_id=%s count=%d", brand_id, len(names))
+                return CompetitorSuggestionsResponse(competitors=names)
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("get_competitor_suggestions: parse failed brand_id=%s", brand_id)
+    return CompetitorSuggestionsResponse(competitors=[])
+
+
+@router.post(
+    "/{brand_id}/competitors",
+    response_model=list[CompetitorResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Save selected competitors",
+)
+async def create_competitors(
+    brand_id: uuid.UUID,
+    body: CompetitorCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CompetitorResponse]:
+    """Bulk-save competitor names for a brand (used during onboarding).
+
+    Replaces any existing competitors for this brand.
+
+    Raises:
+        HTTPException 404: Brand not found or belongs to another user.
+    """
+    await _get_brand_or_404(brand_id, current_user, db)
+
+    # Clear existing competitors for this brand before saving new selection
+    existing = await db.execute(
+        select(Competitor).where(Competitor.brand_id == brand_id)
+    )
+    for c in existing.scalars().all():
+        await db.delete(c)
+
+    saved = []
+    for name in body.names:
+        name = name.strip()
+        if not name:
+            continue
+        competitor = Competitor(brand_id=brand_id, name=name)
+        db.add(competitor)
+        saved.append(competitor)
+
+    await db.commit()
+    for c in saved:
+        await db.refresh(c)
+
+    logger.info("create_competitors: brand_id=%s saved=%d", brand_id, len(saved))
+    return [CompetitorResponse.model_validate(c) for c in saved]
+
+
+# ---------------------------------------------------------------------------
+# Onboarding scan
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_MODELS = [
+    ("chatgpt",  "ChatGPT",  call_openai),
+    ("claude",   "Claude",   call_claude),
+    ("gemini",   "Gemini",   call_gemini),
+]
+
+
+@router.post(
+    "/{brand_id}/onboarding-scan",
+    response_model=OnboardingScanResponse,
+    summary="Run a one-shot AI visibility scan for onboarding",
+)
+async def onboarding_scan(
+    brand_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OnboardingScanResponse:
+    """Run a live scan across ChatGPT, Claude, and Gemini for the brand's first query.
+
+    Used during onboarding to generate the blurred preview report. Runs the
+    three LLM calls in parallel. Does not write to visibility_scores — results
+    are ephemeral display-only data used to show the user their initial report.
+
+    Raises:
+        HTTPException 404: Brand not found or belongs to another user.
+        HTTPException 400: Brand has no active queries yet.
+    """
+    brand = await _get_brand_or_404(brand_id, current_user, db)
+
+    # Use the first active query for the scan
+    query_result = await db.execute(
+        select(QueryModel)
+        .where(QueryModel.brand_id == brand_id, QueryModel.is_active.is_(True))
+        .order_by(QueryModel.created_at.asc())
+        .limit(1)
+    )
+    query = query_result.scalar_one_or_none()
+    if query is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add at least one AI query before running a scan.",
+        )
+
+    prompt = query.prompt_text
+    brand_name_lower = brand.name.lower()
+
+    # Fan out to all three models in parallel
+    responses = await asyncio.gather(
+        *[fn(prompt) for _, _, fn in _ONBOARDING_MODELS],
+        return_exceptions=True,
+    )
+
+    results: list[OnboardingScanResult] = []
+    for (key, display, _), raw in zip(_ONBOARDING_MODELS, responses):
+        if isinstance(raw, Exception) or not raw:
+            raw = ""
+        mentioned = brand_name_lower in raw.lower()
+        snippet = raw[:300].strip() if raw else ""
+        results.append(OnboardingScanResult(
+            model=key,
+            display_name=display,
+            mentioned=mentioned,
+            response_snippet=snippet,
+        ))
+
+    mentioned_count = sum(1 for r in results if r.mentioned)
+    logger.info(
+        "onboarding_scan: brand_id=%s mentioned=%d/3",
+        brand_id, mentioned_count,
+    )
+    return OnboardingScanResponse(
+        brand_name=brand.name,
+        prompt_used=prompt,
+        results=results,
+    )
