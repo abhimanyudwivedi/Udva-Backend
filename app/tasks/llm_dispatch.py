@@ -33,12 +33,12 @@ logger = logging.getLogger(__name__)
 # mapping as strings lets test patches on the module-level names take effect
 # (a module-level dict captures the original reference at import time and is
 # immune to later patch() calls on the individual names).
-DEFAULT_MODELS: list[str] = ["gpt-4o", "claude-sonnet-4-6", "gemini-2.5-flash"]
+DEFAULT_MODELS: list[str] = ["gpt-4o", "claude-sonnet-4-6", "gemini-2.0-flash"]
 
 _MODEL_ATTR: dict[str, str] = {
     "gpt-4o": "call_openai",
     "claude-sonnet-4-6": "call_claude",
-    "gemini-2.5-flash": "call_gemini",
+    "gemini-2.0-flash": "call_gemini",
 }
 
 
