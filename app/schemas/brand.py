@@ -157,10 +157,17 @@ class CompetitorResponse(BaseModel):
     domain: str | None
 
 
-class CompetitorSuggestionsResponse(BaseModel):
-    """LLM-generated competitor name suggestions for a brand."""
+class CompetitorSuggestion(BaseModel):
+    """A single LLM-generated competitor suggestion."""
 
-    competitors: list[str]
+    name: str
+    domain: str
+
+
+class CompetitorSuggestionsResponse(BaseModel):
+    """LLM-generated competitor suggestions for a brand."""
+
+    competitors: list[CompetitorSuggestion]
 
 
 # ---------------------------------------------------------------------------

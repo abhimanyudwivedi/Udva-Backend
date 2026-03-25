@@ -39,6 +39,7 @@ from app.schemas.brand import (
     CompetitorCreate,
     CompetitorEntry,
     CompetitorResponse,
+    CompetitorSuggestion,
     CompetitorSuggestionsResponse,
     KeywordCreate,
     KeywordResponse,
@@ -619,7 +620,8 @@ async def get_suggestions(
 _COMPETITOR_SYSTEM = (
     "You are a market research assistant. Return ONLY valid JSON with no markdown, "
     "no preamble, no explanation. The JSON must have exactly one key: "
-    '"competitors" (array of 5 competitor brand name strings).'
+    '"competitors" (array of 5 objects, each with "name" (brand name string) and '
+    '"domain" (primary website domain, e.g. hubspot.com — no http/https/www prefix)).'
 )
 
 
@@ -646,7 +648,7 @@ async def get_competitor_suggestions(
     prompt = (
         f'List 5 direct competitors for a brand called "{brand.name}"{domain_hint}.\n\n'
         'Return exactly this JSON with no other text:\n'
-        '{"competitors": ["Competitor A", "Competitor B", "Competitor C", "Competitor D", "Competitor E"]}'
+        '{"competitors": [{"name": "Competitor A", "domain": "competitora.com"}, ...]}'
     )
 
     raw = ""
@@ -669,9 +671,16 @@ async def get_competitor_suggestions(
             parsed = json.loads(stripped)
             competitors = parsed.get("competitors")
             if isinstance(competitors, list):
-                names = [str(c).strip() for c in competitors if str(c).strip()][:5]
-                logger.info("get_competitor_suggestions: brand_id=%s count=%d", brand_id, len(names))
-                return CompetitorSuggestionsResponse(competitors=names)
+                suggestions = []
+                for c in competitors:
+                    if isinstance(c, dict):
+                        name = str(c.get("name", "")).strip()
+                        domain = str(c.get("domain", "")).strip()
+                        if name:
+                            suggestions.append(CompetitorSuggestion(name=name, domain=domain))
+                suggestions = suggestions[:5]
+                logger.info("get_competitor_suggestions: brand_id=%s count=%d", brand_id, len(suggestions))
+                return CompetitorSuggestionsResponse(competitors=suggestions)
         except json.JSONDecodeError:
             pass
 
