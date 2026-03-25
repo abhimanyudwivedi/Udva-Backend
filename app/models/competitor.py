@@ -21,6 +21,7 @@ class Competitor(Base):
         UUID(as_uuid=True), ForeignKey("brands.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    domain: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     brand: Mapped["Brand"] = relationship("Brand", back_populates="competitors")  # noqa: F821

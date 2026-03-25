@@ -134,10 +134,17 @@ class SuggestionsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CompetitorEntry(BaseModel):
+    """A single competitor with optional domain."""
+
+    name: str = Field(min_length=1, max_length=120)
+    domain: str | None = Field(default=None, max_length=253)
+
+
 class CompetitorCreate(BaseModel):
     """Payload for POST /brands/{id}/competitors — bulk save from onboarding."""
 
-    names: list[str] = Field(min_length=1, max_length=10)
+    competitors: list[CompetitorEntry] = Field(min_length=1, max_length=10)
 
 
 class CompetitorResponse(BaseModel):
@@ -147,6 +154,7 @@ class CompetitorResponse(BaseModel):
 
     id: uuid.UUID
     name: str
+    domain: str | None
 
 
 class CompetitorSuggestionsResponse(BaseModel):

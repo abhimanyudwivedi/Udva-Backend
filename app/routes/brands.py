@@ -37,6 +37,7 @@ from app.schemas.brand import (
     BrandResponse,
     BrandUpdate,
     CompetitorCreate,
+    CompetitorEntry,
     CompetitorResponse,
     CompetitorSuggestionsResponse,
     KeywordCreate,
@@ -707,11 +708,15 @@ async def create_competitors(
         await db.delete(c)
 
     saved = []
-    for name in body.names:
-        name = name.strip()
+    for entry in body.competitors:
+        name = entry.name.strip()
         if not name:
             continue
-        competitor = Competitor(brand_id=brand_id, name=name)
+        competitor = Competitor(
+            brand_id=brand_id,
+            name=name,
+            domain=entry.domain.strip() if entry.domain else None,
+        )
         db.add(competitor)
         saved.append(competitor)
 

@@ -43,6 +43,8 @@
 
 **Positioning:** Udva helps you rise above competitors in AI search. Where CrowdReply starts at $99/month with limited features, Udva targets indie hackers and early-stage founders with more features at a lower price point.
 
+**Competitor research (CrowdReply):** They generate an instant "AI Search Report" on signup showing visibility score, named competitor rankings, citation sources, and specific Reddit threads to engage. Key differentiator for us: we track multiple AI models (Pillar 1); CrowdReply is primarily a Reddit engagement tool. Planned feature: competitor tracking in onboarding (show user how they rank vs named competitors across AI models).
+
 ---
 
 ## 2. Tech Stack
@@ -829,7 +831,7 @@ JWT_ALGORITHM=HS256
 # Payments — DodoPayments
 DODO_PAYMENTS_API_KEY=...
 DODO_WEBHOOK_SECRET=...
-DODO_ENVIRONMENT=test_mode           # switch to live_mode when ready
+DODO_ENVIRONMENT=live_mode           # live_mode verified 2026-03-25
 DODO_PRODUCT_STARTER=...
 DODO_PRODUCT_GROWTH=...
 DODO_PRODUCT_ENTERPRISE=...
@@ -923,23 +925,35 @@ Build [X] with:
 | Smoke test (sign-in → brand → dashboard) | ✅ Passing |
 | AI suggestions endpoint | ✅ `GET /brands/{id}/suggestions` live |
 | Billing page | ✅ Starter $49 / Growth $199 / Enterprise $299 |
-| DodoPayments webhook handler | ✅ Code complete, test_mode |
+| DodoPayments — checkout + webhooks | ✅ Full flow working in test_mode |
+| DodoPayments — subscription management | ✅ Native UI: details, invoices, cancel |
+| Plan badge in navbar | ✅ Fetches live from `/settings` |
 
 ---
 
-### Step 1 — Complete DodoPayments integration
+### Additional billing endpoints
+```
+GET  /billing/subscription   # subscription details + invoice history
+POST /billing/cancel         # cancel at end of billing period
+```
 
-User is creating products in the DodoPayments dashboard. Once product IDs are available:
-
-1. Add to Railway env vars: `DODO_PRODUCT_STARTER`, `DODO_PRODUCT_GROWTH`, `DODO_PRODUCT_ENTERPRISE`
-2. In `app/routes/billing.py`: ensure `POST /billing/checkout` accepts `{"plan": "starter"|"growth"|"enterprise"}` and returns `{"url": "<checkout_url>"}`
-3. In `udva-frontend/app/dashboard/billing/page.tsx`: wire upgrade buttons to call `POST /billing/checkout`, redirect to returned URL
-4. Change `DODO_ENVIRONMENT=live_mode` when ready to accept real payments
-5. Configure webhook URL in DodoPayments dashboard: `https://udva-backend-production.up.railway.app/billing/webhook`
+### Billing page behaviour
+- Trial users: "Get started" on all 3 plans
+- Paid users: "Current plan" badge, disabled "Downgrade", "Upgrade" for higher tiers
+- Enterprise users: credit top-up banner (coming soon)
+- "Manage subscription & invoices" collapsible panel — plan, next billing date, amount, payment history, cancel
 
 ---
 
-### Step 2 — Onboarding flow (after DodoPayments)
+### Step 1 — Go live with DodoPayments
+
+1. Change `DODO_ENVIRONMENT=live_mode` in Railway
+2. Do one real purchase to verify end-to-end flow in production
+3. Remove test card / sandbox notes from internal docs
+
+---
+
+### Step 2 — Onboarding flow
 
 Build a guided onboarding experience for new users:
 1. Welcome screen → explain what Udva does
@@ -975,6 +989,6 @@ Uncomment Pillar 3 entries in `celery_app.py` once modules are built.
 
 ---
 
-*Last updated: 2026-03-23*
+*Last updated: 2026-03-23 (evening)*
 *Product: Udva · Domain: udva.net*
 *Stack: Python 3.12 · FastAPI · Celery · PostgreSQL · Redis · Railway · Next.js 14 · Vercel · Supabase · DodoPayments*
