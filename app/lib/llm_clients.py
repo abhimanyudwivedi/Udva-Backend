@@ -111,6 +111,8 @@ async def call_openai(prompt: str) -> str:
             len(prompt),
             exc,
         )
+    except Exception as exc:
+        logger.error("openai unexpected_error model=gpt-4o prompt_len=%d: %s", len(prompt), exc)
     return ""
 
 
@@ -154,6 +156,8 @@ async def call_claude(prompt: str) -> str:
             len(prompt),
             exc,
         )
+    except Exception as exc:
+        logger.error("anthropic unexpected_error model=claude-sonnet-4-6 prompt_len=%d: %s", len(prompt), exc)
     return ""
 
 
@@ -171,13 +175,17 @@ async def call_gemini(prompt: str) -> str:
     client = get_gemini_client()
     try:
         response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt,
         )
         return response.text or ""
     except genai_errors.APIError as exc:
         logger.error(
-            "gemini api_error model=gemini-2.5-flash prompt_len=%d: %s", len(prompt), exc
+            "gemini api_error model=gemini-2.0-flash prompt_len=%d: %s", len(prompt), exc
+        )
+    except Exception as exc:
+        logger.error(
+            "gemini unexpected_error model=gemini-2.0-flash prompt_len=%d: %s", len(prompt), exc
         )
     return ""
 
