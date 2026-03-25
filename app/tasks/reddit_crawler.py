@@ -20,12 +20,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import praw.models
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import AsyncSessionLocal
-from app.lib.reddit_client import get_reddit_client
 from app.models.keyword import Keyword
 from app.models.mention import Mention
 from app.tasks.deduplicator import is_duplicate, make_url_hash
@@ -33,24 +33,23 @@ from app.tasks.relevance_scorer import score_mention
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# PRAW helpers (sync — run in thread pool via asyncio.to_thread)
-# ---------------------------------------------------------------------------
-
 _SEARCH_LIMIT = 25
 _TIME_FILTER = "week"
 
+# ---------------------------------------------------------------------------
+# Fetch helpers — PRAW (Option 1) with .json fallback (Option 2)
+# ---------------------------------------------------------------------------
 
-def _fetch_submissions(keyword: str) -> list[dict[str, Any]]:
-    """Search r/all for *keyword* and return raw mention dicts.
+def _credentials_available() -> bool:
+    """Return True if Reddit OAuth credentials are configured."""
+    return bool(settings.REDDIT_CLIENT_ID and settings.REDDIT_CLIENT_SECRET)
 
-    Runs synchronously (PRAW is not async).  Call via ``asyncio.to_thread``.
 
-    Returns:
-        List of mention dicts with keys: url, title, content_snippet, author,
-        engagement, google_rank (always None — filled later by serp_ranker),
-        created_at.
-    """
+def _fetch_via_praw(keyword: str) -> list[dict[str, Any]]:
+    """Fetch submissions using PRAW (requires approved API credentials)."""
+    from app.lib.reddit_client import get_reddit_client
+    import praw.models  # noqa: F401
+
     reddit = get_reddit_client()
     submissions = reddit.subreddit("all").search(
         keyword,
@@ -65,26 +64,82 @@ def _fetch_submissions(keyword: str) -> list[dict[str, Any]]:
         try:
             author_name = s.author.name if s.author else None
         except Exception:
-            pass  # deleted / suspended accounts raise AttributeError
+            pass
 
-        results.append(
-            {
-                "url": f"https://www.reddit.com{s.permalink}",
-                "title": s.title,
-                "content_snippet": s.selftext[:500] if s.selftext else None,
-                "author": author_name,
-                "engagement": s.score,
-                "google_rank": None,  # serp_ranker fills this in a later step
-                "created_at": datetime.fromtimestamp(s.created_utc, tz=timezone.utc),
-            }
-        )
+        results.append({
+            "url": f"https://www.reddit.com{s.permalink}",
+            "title": s.title,
+            "content_snippet": s.selftext[:500] if s.selftext else None,
+            "author": author_name,
+            "engagement": s.score,
+            "google_rank": None,
+            "created_at": datetime.fromtimestamp(s.created_utc, tz=timezone.utc),
+        })
 
-    logger.info(
-        "reddit_crawler: keyword=%r fetched %d submissions from PRAW",
-        keyword,
-        len(results),
-    )
+    logger.info("reddit_crawler: keyword=%r fetched %d submissions via PRAW", keyword, len(results))
     return results
+
+
+def _fetch_via_json_api(keyword: str) -> list[dict[str, Any]]:
+    """Fetch submissions using Reddit's unauthenticated .json API.
+
+    No credentials required. Rate-limited to ~10 req/min by Reddit.
+    Used as the primary method until OAuth credentials are approved.
+    """
+    url = "https://www.reddit.com/search.json"
+    params = {
+        "q": keyword,
+        "sort": "new",
+        "t": _TIME_FILTER,
+        "limit": _SEARCH_LIMIT,
+    }
+    headers = {
+        "User-Agent": getattr(settings, "REDDIT_USER_AGENT", "Udva/1.0"),
+    }
+
+    with httpx.Client(timeout=15) as client:
+        resp = client.get(url, params=params, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+    children = data.get("data", {}).get("children", [])
+    results: list[dict[str, Any]] = []
+
+    for child in children:
+        s = child.get("data", {})
+        results.append({
+            "url": f"https://www.reddit.com{s.get('permalink', '')}",
+            "title": s.get("title", ""),
+            "content_snippet": (s.get("selftext") or "")[:500] or None,
+            "author": s.get("author") or None,
+            "engagement": s.get("score", 0),
+            "google_rank": None,
+            "created_at": datetime.fromtimestamp(
+                s.get("created_utc", 0), tz=timezone.utc
+            ),
+        })
+
+    logger.info("reddit_crawler: keyword=%r fetched %d submissions via .json API", keyword, len(results))
+    return results
+
+
+def _fetch_submissions(keyword: str) -> list[dict[str, Any]]:
+    """Fetch Reddit submissions for *keyword*.
+
+    Uses PRAW (Option 1) if OAuth credentials are configured in the
+    environment (REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET).  Falls back to
+    the unauthenticated .json API (Option 2) otherwise — no credentials
+    needed, works immediately.
+
+    When Reddit approves the API application, set the env vars in Railway
+    and this will automatically switch to PRAW.
+    """
+    if _credentials_available():
+        logger.info("reddit_crawler: using PRAW (credentials configured)")
+        return _fetch_via_praw(keyword)
+
+    logger.info("reddit_crawler: using .json API (no credentials configured)")
+    return _fetch_via_json_api(keyword)
 
 
 # ---------------------------------------------------------------------------
