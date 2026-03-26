@@ -688,6 +688,24 @@ async def get_competitor_suggestions(
     return CompetitorSuggestionsResponse(competitors=[])
 
 
+@router.get(
+    "/{brand_id}/competitors",
+    response_model=list[CompetitorResponse],
+    summary="List saved competitors",
+)
+async def list_competitors(
+    brand_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CompetitorResponse]:
+    """Return all saved competitors for a brand."""
+    await _get_brand_or_404(brand_id, current_user, db)
+    result = await db.execute(
+        select(Competitor).where(Competitor.brand_id == brand_id)
+    )
+    return [CompetitorResponse.model_validate(c) for c in result.scalars().all()]
+
+
 @router.post(
     "/{brand_id}/competitors",
     response_model=list[CompetitorResponse],
