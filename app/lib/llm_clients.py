@@ -27,7 +27,7 @@ You are a structured data extractor. Given an AI model's response to a brand sea
 extract the following and return ONLY valid JSON with no markdown, no preamble:
 {
   "brand_mentioned": true | false,
-  "mention_rank": 1 (first brand mentioned) | 2 | null (not mentioned),
+  "mention_rank": <integer or null — the 1-based ordinal position of the TARGET BRAND among ALL brands, tools, products, or companies listed or recommended in this response. Example: if the response recommends "A, B, TargetBrand, D" then mention_rank is 3. If TargetBrand is the only brand mentioned, mention_rank is 1. Return null if the target brand is not mentioned at all.>,
   "sentiment": "positive" | "neutral" | "negative" | null,
   "cited_urls": ["https://..."]
 }

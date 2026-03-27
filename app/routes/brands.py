@@ -853,16 +853,12 @@ async def onboarding_scan(
     ))
     await db.commit()
 
-    # Kick off the full pipeline in the background so the dashboard populates immediately
+    # Kick off the full pipeline in the background so the dashboard populates tomorrow.
+    # Competitor scoring runs inline inside run_brand_visibility — no separate task needed.
     try:
         from app.tasks.llm_dispatch import run_brand_visibility
-        from celery_app import app as celery_app
         run_brand_visibility.delay(str(brand_id))
-        celery_app.send_task(
-            "app.tasks.competitor_diff.run_competitor_diff_task",
-            args=[str(brand_id)],
-        )
-        logger.info("onboarding_scan: queued visibility + competitor_diff tasks for brand_id=%s", brand_id)
+        logger.info("onboarding_scan: queued visibility task for brand_id=%s", brand_id)
     except Exception as exc:
         logger.warning("onboarding_scan: failed to queue tasks brand_id=%s: %s", brand_id, exc)
 

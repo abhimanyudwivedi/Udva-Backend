@@ -19,7 +19,9 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.lib.llm_clients import call_claude, call_gemini, call_openai
+from app.models.competitor import Competitor
 from app.tasks.citation_extractor import extract_citations
+from app.tasks.competitor_diff import score_competitors_from_response
 from app.tasks.query_builder import build_queries
 from app.tasks.response_parser import parse_response
 from app.tasks.score_writer import write_score
@@ -140,10 +142,18 @@ async def _run_brand_visibility_async(brand_id: str) -> None:
             logger.info("run_brand_visibility: brand_id=%s — no queries, nothing to do", brand_id)
             return
 
+        # Load competitors once — reused across every query × model response
+        # so no extra LLM calls are needed for competitor scoring.
+        competitors_result = await db.execute(
+            select(Competitor).where(Competitor.brand_id == brand_id)
+        )
+        competitors = competitors_result.scalars().all()
+
         logger.info(
-            "run_brand_visibility: brand_id=%s processing %d queries",
+            "run_brand_visibility: brand_id=%s processing %d queries, %d competitors",
             brand_id,
             len(queries),
+            len(competitors),
         )
 
         for query in queries:
@@ -178,6 +188,17 @@ async def _run_brand_visibility_async(brand_id: str) -> None:
                         db=db,
                     )
 
+                # Score all competitors from the same response — zero extra LLM cost.
+                if competitors:
+                    await score_competitors_from_response(
+                        raw_response=raw,
+                        model=model,
+                        query_id=query_id,
+                        brand_id=brand_id,
+                        competitors=list(competitors),
+                        db=db,
+                    )
+
         await db.commit()
         logger.info("run_brand_visibility: brand_id=%s — committed", brand_id)
 
@@ -198,12 +219,6 @@ async def _run_all_active_brands_async() -> None:
 
     for brand_id in brand_ids:
         run_brand_visibility.delay(brand_id)
-        # Competitor diff runs after visibility so both sets of scores land on
-        # the same day.  Uses send_task to avoid a circular import.
-        celery_app.send_task(
-            "app.tasks.competitor_diff.run_competitor_diff_task",
-            args=[brand_id],
-        )
 
 
 # ---------------------------------------------------------------------------
