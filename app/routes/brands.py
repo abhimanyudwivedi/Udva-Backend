@@ -30,6 +30,7 @@ from app.lib.llm_clients import call_claude, call_gemini, call_openai, get_anthr
 from app.models.brand import Brand
 from app.models.competitor import Competitor
 from app.models.keyword import Keyword
+from app.models.onboarding_scan import OnboardingScan
 from app.models.query import Query as QueryModel
 from app.models.user import User
 from app.schemas.brand import (
@@ -788,6 +789,19 @@ async def onboarding_scan(
     """
     brand = await _get_brand_or_404(brand_id, current_user, db)
 
+    # Return cached scan if one already exists for this brand
+    cached = (await db.execute(
+        select(OnboardingScan).where(OnboardingScan.brand_id == brand_id)
+    )).scalar_one_or_none()
+
+    if cached is not None:
+        logger.info("onboarding_scan: returning cached result for brand_id=%s", brand_id)
+        return OnboardingScanResponse(
+            brand_name=cached.brand_name,
+            prompt_used=cached.prompt_used,
+            results=[OnboardingScanResult(**r) for r in cached.results],
+        )
+
     # Use the first active query for the scan
     query_result = await db.execute(
         select(QueryModel)
@@ -826,9 +840,18 @@ async def onboarding_scan(
 
     mentioned_count = sum(1 for r in results if r.mentioned)
     logger.info(
-        "onboarding_scan: brand_id=%s mentioned=%d/3",
+        "onboarding_scan: brand_id=%s mentioned=%d/3 (fresh run)",
         brand_id, mentioned_count,
     )
+
+    # Persist results so subsequent calls are served from cache
+    db.add(OnboardingScan(
+        brand_id=brand_id,
+        brand_name=brand.name,
+        prompt_used=prompt,
+        results=[r.model_dump() for r in results],
+    ))
+    await db.commit()
 
     # Kick off the full pipeline in the background so the dashboard populates immediately
     try:
